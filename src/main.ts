@@ -13,7 +13,7 @@ async function bootstrap() {
     }),
   );
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 8080;
   await app.listen(port);
   console.log(`Referral Tree API listening on port ${port}`);
 }
