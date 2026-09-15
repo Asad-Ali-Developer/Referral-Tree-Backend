@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon (and other PgBouncer-fronted providers) require a separate,
+  // non-pooled connection for migrations — pooled/transaction-mode
+  // connections don't support the prepared statements `migrate`
+  // needs. Runtime queries still use the pooled DATABASE_URL above.
+  directUrl = env("DIRECT_URL")
+}
+
+model School {
+  id        String     @id @default(cuid())
+  name      String
+  users     User[]
+  referrals Referral[]
+  createdAt DateTime   @default(now())
+
+  @@index([name])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  schoolId     String
+  school       School   @relation(fields: [schoolId], references: [id])
+  referralCode String   @unique
+  createdAt    DateTime @default(now())
+
+  // Adjacency-list edge: fast for tree traversal / recursive CTEs.
+  referredById String?
+  referredBy   User?    @relation("UserReferrals", fields: [referredById], references: [id])
+  referredUsers User[]  @relation("UserReferrals")
+
+  // Referral-event side of the same edge, kept as its own model so the
+  // referral relationship is an auditable, timestamped record rather
+  // than just an FK column. referredById is the source of truth for
+  // "who is my referrer right now"; Referral is the append-only log.
+  referralAsReferrer Referral[] @relation("ReferrerRelation")
+  referralAsReferred Referral?  @relation("ReferredRelation")
+
+  // schoolId alone: "all users in school X" (e.g. admin listing)
+  @@index([schoolId])
+  // referredById alone: "children of this user" lookups outside the CTE
+  @@index([referredById])
+  // composite: the shape almost every tenant-scoped tree/stats query
+  // actually filters on (WHERE schoolId = ? AND referredById = ?)
+  @@index([schoolId, referredById])
+}
+
+model Referral {
+  id             String   @id @default(cuid())
+  schoolId       String
+  school         School   @relation(fields: [schoolId], references: [id])
+  referrerId     String
+  referrer       User     @relation("ReferrerRelation", fields: [referrerId], references: [id])
+
+  // UNIQUE is the actual DB-level enforcement of "a user cannot be
+  // referred twice" — not just an application-level check.
+  referredUserId String   @unique
+  referredUser   User     @relation("ReferredRelation", fields: [referredUserId], references: [id])
+
+  createdAt      DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([referrerId])
+  @@index([schoolId, referrerId])
+}
