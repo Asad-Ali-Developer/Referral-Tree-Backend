@@ -31,10 +31,7 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
-// Safety cap for the recursive CTE. A forest can never actually
-// exceed this given how referrals are created (see the note in
-// createReferral below on why cycles can't form), but a hard ceiling
-// keeps a malformed row from ever making the query recurse forever.
+// Max depth for recursive CTE queries to prevent infinite loops on malformed data.
 const MAX_DEPTH = 50;
 
 @Injectable()
@@ -62,7 +59,7 @@ export class ReferralsService {
       throw new NotFoundException("Referral code not found");
     }
 
-    // Rule: referral must stay inside the same school.
+    // Ensure the referrer belongs to the same school.
     if (referrer.schoolId !== schoolId) {
       throw new BadRequestException(
         "Referral code does not belong to this school",
@@ -73,7 +70,7 @@ export class ReferralsService {
       where: { email: dto.email },
     });
     if (existing) {
-      // Rule: a user cannot refer themselves.
+      // Prevent self-referral.
       if (existing.id === referrer.id) {
         throw new BadRequestException("A user cannot refer themselves");
       }
@@ -85,14 +82,9 @@ export class ReferralsService {
       bcrypt.hash(dto.password, SALT_ROUNDS),
     ]);
 
-    // Note on circular referrals: referredById is only ever set once,
-    // at creation, and only ever points at a user that already
-    // existed before this request. A brand-new row can't be an
-    // ancestor of anyone yet, so a cycle is structurally impossible
-    // under this API. The only way to introduce one would be a future
-    // "re-parent an existing user" feature — if that's ever added, it
-    // must walk the new referrer's ancestor chain first and reject if
-    // the target user appears in it.
+    // Circular referrals are structurally impossible here since referredById
+    // is only set at creation and points to an existing user. If a "re-parent"
+    // feature is added later, it must check the ancestor chain to prevent cycles.
     const result = await this.prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
@@ -105,11 +97,8 @@ export class ReferralsService {
         },
       });
 
-      // Rule: a user cannot be referred twice — enforced here by
-      // construction (each user is created with at most one
-      // referredById) AND at the DB level by the unique constraint on
-      // Referral.referredUserId, so a race between two concurrent
-      // requests still fails safely instead of double-inserting.
+      // A user can only be referred once. This is enforced by the DB unique
+      // constraint on Referral.referredUserId, preventing race conditions.
       await tx.referral.create({
         data: {
           schoolId,
@@ -121,8 +110,7 @@ export class ReferralsService {
       return newUser;
     });
 
-    // The referral graph for this school changed — invalidate cached
-    // tree/stats reads by bumping the school's cache version.
+    // Invalidate cached tree/stats for this school.
     await this.redis.bumpSchoolCacheVersion(schoolId);
 
     return result;
@@ -148,12 +136,8 @@ export class ReferralsService {
 
     const cacheKey = await this.cacheKey(schoolId, `tree:${effectiveDepth}`);
     return this.redis.remember(cacheKey, 30, async () => {
-      // Single query, no N+1: fetch every node up to `depth` levels
-      // deep in one round trip, then assemble the nested shape in
-      // memory. Scales to large schools because the heavy lifting
-      // (the recursion) happens inside Postgres, using the
-      // (schoolId, referredById) index rather than N sequential
-      // round trips from the app.
+      // Fetch the entire tree up to `depth` in a single query to avoid N+1 problems.
+      // The recursive CTE handles the heavy lifting in Postgres.
       const rows = await this.prisma.$queryRaw<TreeRow[]>`
         WITH RECURSIVE tree AS (
           SELECT id, name, "referredById", 0 AS level
@@ -182,7 +166,7 @@ export class ReferralsService {
     });
   }
 
-  /** Stats rooted at a single user, e.g. Ahmed's direct/total referrals. */
+  /** Get referral stats for a specific user and their downline. */
   private async getStatsForUser(schoolId: string, userId: string) {
     const root = await this.prisma.user.findFirst({
       where: { id: userId, schoolId },
@@ -206,7 +190,7 @@ export class ReferralsService {
     return this.summarize(rows);
   }
 
-  /** School-wide stats aggregated across every root in the forest. */
+  /** Get aggregated referral stats for the entire school. */
   private async getStatsForSchool(schoolId: string) {
     const rows = await this.prisma.$queryRaw<StatsRow[]>`
       WITH RECURSIVE tree AS (

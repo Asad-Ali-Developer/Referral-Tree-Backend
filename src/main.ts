@@ -5,6 +5,7 @@ import { allowedHeaders, allowedOrigins } from "./utils";
 import * as passport from "passport";
 import cookieParser = require("cookie-parser");
 import { json, urlencoded } from "express";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -23,6 +24,17 @@ async function bootstrap() {
     credentials: true,
     allowedHeaders: allowedHeaders,
   });
+
+  // Configure Swagger
+  const config = new DocumentBuilder()
+    .setTitle("Referral Tree APIs")
+    .setDescription("Created by: asadali.dev512@gmail.com")
+    .setVersion("1.25")
+    .addTag("NestJs")
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup("/api-docs", app, document);
 
   app.use(passport.initialize());
 

@@ -18,10 +18,10 @@ export class SchoolsService {
   }
 
   /**
-   * Creates a user with no referrer — i.e. a tree root (like Ahmed in
-   * the example). The referral flow can only attach a new user to an
-   * EXISTING referrer, so every school needs at least one root created
-   * this way (an admin/onboarding action) before referrals can start.
+   * Creates a root user for a given school.
+   * Root users have no referrer (referredById is null) and act as the
+   * starting point for the school's referral tree. This is intended
+   * for admin or initial onboarding use.
    */
   async createRootUser(
     schoolId: string,

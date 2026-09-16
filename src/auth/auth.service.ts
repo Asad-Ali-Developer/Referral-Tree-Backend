@@ -57,6 +57,12 @@ export class AuthService {
         referralCode: true,
         referredById: true,
         createdAt: true,
+        school: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     });
 
