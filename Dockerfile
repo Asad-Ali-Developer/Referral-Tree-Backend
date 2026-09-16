@@ -1,50 +1,25 @@
 # Use official Node.js image
-FROM node:18-alpine AS builder
+FROM node:18
 
-# Install system dependencies
-RUN apk add --no-cache python3 make g++
+# Install system dependencies including git, python3
+RUN apt-get update && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package.json first for better layering
 COPY package*.json ./
 
-# Install ALL dependencies (including devDependencies for building)
-RUN npm install
+# Install dependencies
+RUN npm ci
 
-# Copy source code
+# Copy the rest of the project (including .git folder)
 COPY . ./
 
-# Generate Prisma Client
-RUN npx prisma generate
+# Optional: Debugging
+RUN ls -la
 
-# Build the application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine
-
-# Install runtime dependencies only
-RUN apk add --no-cache openssl
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm install --only=production
-
-# Copy the built application from builder stage
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-
-# Verify dist exists
-RUN ls -la dist/
-
-# Expose port
-EXPOSE 3000
-
-# Start the application
-CMD ["node", "dist/main.js"]
+# Start the app
+CMD ["npm", "run", "start"]
